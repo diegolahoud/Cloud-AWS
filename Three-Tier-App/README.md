@@ -29,3 +29,22 @@ The objective of this project is to create a secure and scalable three-tier web 
 * **Amazon Aurora Database:** 1 Primary Database in AZ1
 * **Amazon Aurora Database:** 1 Backup Read Replica in AZ2
 * **Possible Considerations for Future Expansions:** Amazon S3, NAT Gateway, VPC Endpoints
+
+## VPC and Subnet Creation
+
+### VPC Setup
+1. Go to the AWS services search bar and type **VPC** to navigate to the main VPC console.
+2. In the upper right corner, click on **Create VPC**.
+3. Select **VPC only**.
+4. Fill out the **Name tag** (for this lab, use `3-Tier-App-Project`).
+5. Input the IPv4 CIDR previously selected for the VPC (`192.168.0.0/24`).
+6. Click **Create VPC**.
+
+### Subnet Setup
+1. After creating the VPC, click on **Subnets** in the left-hand navigation pane and click **Create subnet**.
+2. Select the `3-Tier-App-Project` VPC from the dropdown menu.
+3. Add the **Subnet name** (e.g., `AZA-WebTier-Public` for the first one).
+4. Select the **Availability Zone** (e.g., `us-east-1a`).
+5. The IPv4 VPC CIDR block should automatically populate. Enter the specific subnet range in the **IPv4 subnet CIDR block** field (for the first one, use `192.168.0.0/28`).
+6. Click **Add new subnet** and fill out the respective information for the remaining subnets.
+7. Once all subnets are configured, click **Create subnet**.
