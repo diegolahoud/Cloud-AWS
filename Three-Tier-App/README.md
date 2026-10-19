@@ -1,7 +1,7 @@
 ### Secure & Scalable Three-Tier Application in AWS
 
 ## Overview
-The objective of this project is to create a secure and scalable three-tier web application in AWS. The infrastructure is deployed in the **us-east-1** region within a custom Virtual Private Cloud (VPC) using the `192.168.0.0/24` CIDR block. To ensure high availability, the VPC spans two Availability Zones (**us-east-1a** and **us-east-1b**), each containing four distinct subnets.
+The objective of this project is to create a secure and scalable three-tier web application in AWS. The infrastructure is deployed in the **us-east-1** region within a custom Virtual Private Cloud (VPC) using the `192.168.0.0/24` CIDR block. To ensure high availability, the VPC spans two Availability Zones (**us-east-1a** and **us-east-1b**), each containing four distinct subnets. To ensure the Least Privilege principle, this lab will have 4 different users, with 4 different level of access so each users will be added to a Group where they will be only have the exact amount of access they need.
 
 ## VPC and Subnets
 
@@ -17,6 +17,21 @@ The objective of this project is to create a secure and scalable three-tier web 
 * **AZB-DBTier-Private:** `192.168.0.112/28`
 * **AZB-Reserved-Private:** `192.168.0.128/28`
 
+## IAM Users & Groups:
+**Note:** This lab used standard IAM Users, and not the new AWS Identity Center. Using AWS Identity Center is the new best practice of AWS but for this case it was not used. 
+
+* **User** Dev1 | **Group:** DevGroup | **Group Access Level:** AmazonEC2ReadOnlyAccess, AmazonS3FilesClientReadWriteAccess, and CloudWatchEventsReadOnlyAccess. 
+
+* **User** Ops1 | **Group:** OpsGroup | **Group Access Level:** AmazonEC2FullAccess, AutoScalingFullAccess, ElasticLoadBalancingFullAccess, and AmazonRDSReadOnlyAccess
+
+* **User** admin-projects (main account) | **Group:** AdminGroup | **Group Access Level:** AdministratorAccess
+
+* **User** Auditor1 | **Group:** AuditorGroup | **Group Access Level:**  SecurityAudit, and ViewOnlyAccess
+
+## AWS Security Groups:
+
+WHICH SG?
+
 ## AWS Services Used
 
 * **Amazon Route 53 (R53)**
@@ -30,7 +45,8 @@ The objective of this project is to create a secure and scalable three-tier web 
 * **Amazon Aurora Database:** 1 Backup Read Replica in AZ2
 * **Possible Considerations for Future Expansions:** Amazon S3, NAT Gateway, VPC Endpoints
 
-## VPC and Subnet Creation
+
+## VPC & Subnet Creation
 
 ### VPC Setup
 1. Go to the AWS services search bar and type **VPC** to navigate to the main VPC console.
@@ -48,3 +64,4 @@ The objective of this project is to create a secure and scalable three-tier web 
 5. The IPv4 VPC CIDR block should automatically populate. Enter the specific subnet range in the **IPv4 subnet CIDR block** field (for the first one, use `192.168.0.0/28`).
 6. Click **Add new subnet** and fill out the respective information for the remaining subnets.
 7. Once all subnets are configured, click **Create subnet**.
+
