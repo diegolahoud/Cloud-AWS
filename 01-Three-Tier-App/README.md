@@ -208,7 +208,7 @@ Navigate to **Security Groups** (under the VPC console, on the left side) and cr
 
 ## Part C) Create the Internal Target Group
 
-> *Notes:* This is a list of the servers (in the app tier) that are healthy and ready to take traffic from the ALB. The internal Target Groups are importnat because it is the one that sends health checks to the servers in the app tier to see if they are healthy, and ready to receive traffic. When ASG provision a new instance, it will be automatically added to the target group, it is highly available as it will work between different AZs.
+> *Notes:* This is a list of the servers (in the app tier) that are healthy and ready to take traffic from the ALB. The internal Target Groups are important because it is the one that sends health checks to the servers in the app tier to see if they are healthy, and ready to receive traffic. When ASG provision a new instance, it will be automatically added to the target group, it is highly available as it will work between different AZs.
 
 1) Go to the EC2 console, and on the left side click on "Target Groups" under Load Balancing 
 2) Click "Create Target Group".
@@ -255,7 +255,7 @@ D) The Target Tracking Policy is different, it will only check the resources on 
 
 > **Note1:** We will not be connecting to our EC2 instances via SSH (Port 22). Instead, we will use AWS Systems Manager (SSM) Session Manager to check our network connectivity, private subnet routing, and IAM permissions.
 
-> **Note2:** Because the App Tier is in a private subnet, it cannot connect to the public internet, which normally prevents SSM from working. This is where Interface Endpoints come in handy to provide extra security. Instead of enabling a NAT Gateway on the VPC, we create three VPC endpoints that establish a private, direct tunnel between our VPC and the AWS public services. AWS places a private network interface (with a local IP from our subnet) directly inside the VPC. The EC2 instance talks to that local IP, and AWS routes the traffic internally over its own backbone network.
+> **Note2:** Because the App Tier is in a private subnet, it cannot connect to the public internet, which normally prevents SSM from working. This is where Interface Endpoints come in handy to provide extra security, we create three VPC endpoints that establish a private, direct tunnel between our VPC and the AWS public services. AWS places a private network interface (with a local IP from our subnet) directly inside the VPC. The EC2 instance talks to that local IP, and AWS routes the traffic internally over its own backbone network. We will still need the NAT Gateway for the private tier to access the Internet.
 
 To allow this, we must create three Interface Endpoints:
 
@@ -285,8 +285,291 @@ III) Verify Connection
 4) Click on the Session Manager, and click on connect. 
 5) If it does not connect, reboot the system and try to connect via SSM again. 
 
+## Part G) Create the Web Tier Infrastructure
+> **Notes:** We will be using SSM to remote into the EC2 instances in the web-tier as well. The web-tier will have public internet access that we need to enabled, and we need to add the IAM role to the template so we can SSM into the EC2-web-tier instances. They do not need a VPC endpoint because they have public IPv4 addresses.
+
+I) Enable Auto-Assign Public IPs.
+
+1. Go to the VPC AWS menu, and click on "Subnets" on the left menu.
+2. Select the "AZA-WebTier-Public" subnet, click the Actions buttom, and select on "Edit Subnet Settings".
+3. Check the box for "Enable auto-assign public ipv4 address", and click save.
+4. Do the same for the subnet "AZB-WebTier-Public".
+
+II) Create the Web Tier IAM Role
+
+1. Go to the IAM console, click "Roles", and click "Create Role".
+2. Leave the AWS service, click on service and select "EC2", and click next
+3. Search for the permission policy named "AmazonSSMManagedInstanceCore", and add it.
+4. Click next, and for the name add "Web-Tier-SSM-Role"
+
+III) Create the Web Tier Launch Template
+
+1. Go to EC2 console, select Launch Templates on the left side of AWS, and click "Create Launch Templates" 
+2. The name will be "web-tier-template"
+3. For the Amazon Machine Image click "Quick Start", and select the "Amazon Linux 2023 AMI".
+4. The instance type select "t2.micro".
+5. For key pair select "Do not include in launch template". We will be using SSM to connect instead of SSH. SSM provide better security as it relies on identity-base IAM credentials. And SSM is centrally managed using IAM policies. 
+6. For network settings, do not select a subnet and select the Security Group of the web tier (web-tier-sg)
+7. Go to the advanced details, click on IAM Instance Profile, and select the "Web-Tier-SSM-Role"
+8. Click on launch template
+
+IV) Create the Public Target Group
+
+1. Go to the EC2 console, and on the left side click on "Target Groups" under Load Balancing 
+2. Click "Create Target Group".
+3. Select "Instances". The target group name "web-tier-tg". Protocol "HTTP" port 80. For the VPC selects the "3-Tier-App-Project".
+4. Set the Health check path as "/". This is the path where the Target Group will send the pings to make sure the instances are healthy
+5. Leave the Register Targets app completly blank, and click on Create Target Group. 
+
+V) Create the public Load Balancer 
+
+1. On the EC2 menu, click "Load Balancers" on the left, and click "Application Load Balancer" and create.
+2. Load balancer name: alb-public-web. 
+3. Scheme: Internet-Facing
+4. Load Balancer IP address type: IPv4.
+5. Network Mapping: Select the "3-Tier-App-Project" VPC. Check both Availability Zones (us-east-1a & us-east-1b). And select the AZA-WebTier-Public & AZB-WebTier-Public subnets.
+6. Security Groups: Remove the default, and add: web-tier-sg
+7. For the listeners and routing, add HTTP port 80, and on the routing action, select the web-tier-sg.
+
+VI) Create the Web Tier Auto Scaling (ASG).
+
+1. Go to the EC2 menu, and on the left side click on Auto Scaling Group, and click on "Create Auto Scaling Group"
+2. Name type "web-tier-asg". On the launch template select "web-tier-template", and click next. 
+3. VPC select the "3-Tier-App-Project", and select both Availability Zones, and subnets that will be provision: AZA-WebTier-Public (us-east-1a) and AZB-WebTier-Public (us-east-1b). Leave the rest as default.
+4. On the Load Balancing, click "Attach to an existing load balancer", then "choose from your load balancer target groups", and select the "web-tier-tg".
+5. Turn on "Elastic Load Balancing health checks". The ELB will send health check to the EC2 instance, and if they do not pass the test. The ELB marks it as "unhealthy" so the ASG can read it, and replace the unhealthy EC2 instance.
+6. Health check grace period: 300 seconds. Click next
+7. Select the group size, and scaling policies. For desired capacity select 1, for minimun capacity select 1, and for maximun capacity select 3. This means that the Auto Scaling Group will always have one instances running at all time (desired capacity), and it will provisioned up to 3 instances (maximum capacity). The minimun capacity is equal to the desired capacity so it will always be running with one.
+8. Select "Target tracking scaling policy". This will help us keep track of a metric so ASG can decide if it needs to provision or remove resources. The name will be "Target Tracking Policy: Ave CPU Utilization" Metric type will be "Average CPU Utilization", and target value will be "50". If the EC2 instance's Average CPU is equal or more than 50, then it will provision a another instance.
+9. Leave the rest as default, and click create.
+
+VII) Verify connection
+1. Wait until the EC2 instance is in a "running" state.
+2. Verify it has a public IPv4 address.
+3. Click on "Connect", and select SSM.
+
+## Checkpoint
+
+> **Note:** Up until this point, we are done with the infrastructure of the web-app. We have all the infrastructure where the app services will be running so now we need to configure the AWS services to customize it for our website.
+
+> **Website Information:** The website will be a "Watchlist and Tracker app" for videogames, and movies/TV shows. We will add a media that I would like to watch or play, and once it is done we will have a "Played" or "Watched" buttom. 
+
+> **Cost Information:** To save cost, I will be creating a Cloudformation template for the Endpoints Interfaces, and the Loadbalancers as they are hourly cost, and I cannot turn them on and off like RDS. As a side note, this is not ideal for an website that needs to be running 24/7, and critical website. I will be implementnig this option to optimize costs because it is a personal project
 
 
+## Part J) Initialize the Database.
+
+> **Note1:** We will need to connect to the EC2 instances on the Web-Tier to be able to install the software for the SQL database. Why? Because it needs connection to the public internet that the private-tier does not have. To be able to connect to our Web-Tier EC2 instances using SSM, we need to go to the security group of the Endpoint Interfaces, and add inbound rules of HTTPS port 443 in the source of the Web-Tier-SG. Once we do that, we will be able to connect to the EC2 instances using SSM
+> Why the error with the SSM happened? Because we enable "private DNS name" on the VPC level. When we did that, all the SSM traffic is going to the VPC Endpoints first, and because the only good source was the Private Tier, it was not working. It was only all SSM traffic, not traffic in general. 
+
+> **Note2:** To be able to connect to the database from the Web-Tier EC2 instances, we need to allow that source from the Database Security Group. Right now, the database security group allows MySQL traffic on port 3306 on the private tier. By adding the same protocol and port but the source as Web-Tier, we will be able to connect to the database. 
+
+I) Remove for now the ALB check on the ASG.
+
+1. Because we have not set up anything yet on the EC2 instances, the ALB does a health check on the ports but because there is no traffic, it thinks it is down so it is on a loop creating an deleting instances.
+2. Go to the "app-tier-asg", scroll down on the Health Checks, and click on Edit
+3. Turn off the Elastic Load Balancing health checks
+4. Do the same for the "web-tier-asg".
+
+II) Get your Database Endpoint.
+
+1. Go to the RDS menu, click on the "three-tier-db" database, and go to Connectivity & Security, and change the Connect Using to "Endpoints". Scroll down, copy the endpoint name, and save it somewhere safe. 
+
+III) Connect to the Web App Tier.
+
+1. Connect to an EC2 instance (using the Web Tier EC2) via SSM.
+
+IV) Install the Database Client and Log In
+
+1. In the EC2 screen, type the command `sudo dnf install mariadb105 -y` to install the tool needed to talk to your database.
+2. Connect to the database using `mysql -h YOUR_ENDPOINT -u <username> -p`
+3. Use the secrets credentials in the RDS database secret link
+
+V) Create the Database and Table
+
+1. Run the command `CREATE DATABASE media_tracker;
+
+USE media_tracker;
+
+CREATE TABLE media_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  media_type VARCHAR(50) NOT NULL,
+  status VARCHAR(50) DEFAULT 'Pending'
+);`
+2. And add test data to the tables with the command: `INSERT INTO media_items (title, media_type, status) VALUES ('The Legend of Zelda', 'Video Game', 'Played');
+INSERT INTO media_items (title, media_type, status) VALUES ('Interstellar', 'Movie', 'Pending');`
+3. Exit the database with `exit;`
+4. Lock the database back down again. The web tier and the database should not talk to each other. This was a temporary solution so remove the access in the security group that we added before. 
+
+## Part K) Build NAT Gateway
+
+I) Create NAT Gateway
+
+1. Go to the VPC menu, and click on "NAT Gateways" on the left, and click "Create NAT Gateway".
+2. Select on "Zonal"
+3. The name "three-tier-nat"
+4. Select the "web-public-AZA subnet.
+5. For VPC select the "3-Tier-App-Project".
+6. Ensure connectivity is set to Public, and click "Allocate Elastic IP"
+7. Create and wait
+
+II) Add a rule on the routing table on the private subnet. 
+
+1. Go to the "Private-RT-3TierApp" route tablem and add a new route for 0.0.0.0/0 pointing to the NAT Gateway.
+
+## Part L) Build the App-Tier (Backend)
+
+1. Connect to the App-Tier EC2 instance via SSM
+2. Install the back end enviroment using the following set of commands:
+
+```command
+sudo dnf install -y nodejs
+mkdir ~/backend
+cd ~/backend
+npm init -y
+npm install express mysql2 @aws-sdk/client-secrets-manager
+npm audit fix
+```
+3. Create the backend code. Nano and create a file named "app.js" and add the next command. Remember to replace the information with the database information
+
+```command
+const express = require('express');
+const mysql = require('mysql2/promise');
+const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+
+const app = express();
+const port = 8080;
+
+const secretName = "YOUR_SECRET_ARN_HERE"; 
+const dbHost = "YOUR_DATABASE_ENDPOINT_HERE";
+
+const smClient = new SecretsManagerClient({ region: "us-east-1" });
+let dbPool;
+
+async function initDb() {
+    try {
+        const response = await smClient.send(new GetSecretValueCommand({ SecretId: secretName }));
+        const credentials = JSON.parse(response.SecretString);
+
+        dbPool = mysql.createPool({
+            host: dbHost,
+            user: credentials.username,
+            password: credentials.password,
+            database: 'media_tracker',
+            waitForConnections: true,
+            connectionLimit: 10,
+            queueLimit: 0
+        });
+        console.log("Database connected securely via Secrets Manager!");
+    } catch (error) {
+        console.error("Failed to connect to the database:", error);
+    }
+}
+
+initDb();
+
+app.get('/', (req, res) => {
+    res.status(200).send("App Tier is Healthy");
+});
+
+app.get('/api/media', async (req, res) => {
+    try {
+        const [rows] = await dbPool.query('SELECT * FROM media_items');
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.listen(port, () => {
+    console.log(`Backend API listening on port ${port}`);
+});
+```
+4. Start the server with the command `node app.js`
+
+## Part M) Configure Web Tier
+
+1. Keep the backend running so open a new tab with the web tier without closing the backend, and connect via SSM to a EC2 instance in the Web-Tier.
+2. Install and start Nginx with the commands: 
+
+```command
+sudo dnf install -y nginx
+sudo systemctl start nginx
+sudo systemctl enable nginx
+```
+3. Create the Frontend Interface with the commands:
+
+```command
+sudo rm /usr/share/nginx/html/index.html
+sudo nano /usr/share/nginx/html/index.html
+```
+
+4. Create the front interface with the command:
+
+```command
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Media Watchlist</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+        table { margin: 0 auto; border-collapse: collapse; width: 60%; }
+        th, td { border: 1px solid #ddd; padding: 12px; }
+        th { background-color: #f2f2f2; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>My Media Watchlist</h1>
+    <button onclick="loadMedia()">Load Database Records</button>
+    <br><br>
+    <table id="mediaTable">
+        <thead>
+            <tr><th>Title</th><th>Type</th><th>Status</th></tr>
+        </thead>
+        <tbody id="mediaBody">
+            <!-- Database rows will populate here -->
+        </tbody>
+    </table>
+
+    <script>
+        async function loadMedia() {
+            try {
+                const response = await fetch('/api/media');
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+                
+                const tbody = document.getElementById('mediaBody');
+                tbody.innerHTML = '';
+                
+                data.forEach(item => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${item.title}</td><td>${item.type}</td><td>${item.status}</td>`;
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Error fetching media:', error);
+                alert('Failed to load data. The backend might not be routed properly yet.');
+            }
+        }
+    </script>
+</body>
+</html>
+```
+
+
+
+
+
+
+
+
+
+
+
+
+Create AMI and launch template
 
 LESSONS LEARNED:
 
@@ -294,3 +577,7 @@ LESSONS LEARNED:
 2. AWS services like RDS, Target Groups, ASG.
 3. Attention to detail
 4. Learn more about VPC Endpoint 
+5. Roles in EC2 to SSM.
+6. Should ALB keep the SSL and do not terminate it?
+7. RDS and Loadbalancing costs
+8. Budget optimization
